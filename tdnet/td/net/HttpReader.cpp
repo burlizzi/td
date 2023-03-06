@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -84,7 +84,7 @@ Result<size_t> HttpReader::read_next(HttpQuery *query, bool can_be_slow) {
           return Status::Error(501, "Unimplemented: unsupported transfer-encoding");
         }
 
-        if (content_encoding_.empty()) {
+        if (content_encoding_.empty() || content_encoding_ == "none") {
         } else if (content_encoding_ == "gzip" || content_encoding_ == "deflate") {
           gzip_flow_ = GzipByteFlow(Gzip::Mode::Decode);
           GzipByteFlow::Options options;
@@ -162,7 +162,7 @@ Result<size_t> HttpReader::read_next(HttpQuery *query, bool can_be_slow) {
         if (flow_sink_.is_ready()) {
           CHECK(query_->container_.size() == 1u);
           query_->container_.emplace_back(content_->cut_head(content_->size()).move_as_buffer_slice());
-          query_->content_ = query_->container_.back().as_slice();
+          query_->content_ = query_->container_.back().as_mutable_slice();
           break;
         }
 
@@ -174,8 +174,8 @@ Result<size_t> HttpReader::read_next(HttpQuery *query, bool can_be_slow) {
         }
         // save content to a file
         if (temp_file_.empty()) {
-          auto file = open_temp_file("file");
-          if (file.is_error()) {
+          auto open_status = open_temp_file("file");
+          if (open_status.is_error()) {
             return Status::Error(500, "Internal Server Error: can't create temporary file");
           }
         }
@@ -207,9 +207,9 @@ Result<size_t> HttpReader::read_next(HttpQuery *query, bool can_be_slow) {
           query_->container_.emplace_back(content_->cut_head(size).move_as_buffer_slice());
           Status result;
           if (content_type_lowercased_.find("application/x-www-form-urlencoded") != string::npos) {
-            result = parse_parameters(query_->container_.back().as_slice());
+            result = parse_parameters(query_->container_.back().as_mutable_slice());
           } else {
-            result = parse_json_parameters(query_->container_.back().as_slice());
+            result = parse_json_parameters(query_->container_.back().as_mutable_slice());
           }
           if (result.is_error()) {
             if (result.code() == 413) {
@@ -293,7 +293,7 @@ Result<bool> HttpReader::parse_multipart_form_data(bool can_be_slow) {
           CHECK(temp_file_.empty());
           temp_file_name_.clear();
 
-          Parser headers_parser(headers.as_slice());
+          Parser headers_parser(headers.as_mutable_slice());
           while (headers_parser.status().is_ok() && !headers_parser.data().empty()) {
             MutableSlice header_name = headers_parser.read_till(':');
             headers_parser.skip(':');
@@ -378,6 +378,7 @@ Result<bool> HttpReader::parse_multipart_form_data(bool can_be_slow) {
                     header_value = MutableSlice();
                   }
                 }
+                value = url_decode_inplace(value, false);
 
                 if (key == "name") {
                   field_name_ = value;
@@ -408,10 +409,6 @@ Result<bool> HttpReader::parse_multipart_form_data(bool can_be_slow) {
             if (query_->files_.size() == max_files_) {
               return Status::Error(413, "Request Entity Too Large: too many files attached");
             }
-            auto file = open_temp_file(file_name_);
-            if (file.is_error()) {
-              return Status::Error(500, "Internal Server Error: can't create temporary file");
-            }
 
             // don't need to save headers for files
             file_field_name_ = field_name_.str();
@@ -436,7 +433,7 @@ Result<bool> HttpReader::parse_multipart_form_data(bool can_be_slow) {
           }
 
           query_->container_.emplace_back(content_->cut_head(form_data_read_length_).move_as_buffer_slice());
-          MutableSlice value = query_->container_.back().as_slice();
+          MutableSlice value = query_->container_.back().as_mutable_slice();
           content_->advance(boundary_.size());
           form_data_skipped_length_ += form_data_read_length_ + boundary_.size();
           form_data_read_length_ = 0;
@@ -466,6 +463,12 @@ Result<bool> HttpReader::parse_multipart_form_data(bool can_be_slow) {
       case FormDataParseState::ReadFile: {
         if (!can_be_slow) {
           return Status::Error("SLOW");
+        }
+        if (temp_file_.empty()) {
+          auto open_status = open_temp_file(file_name_);
+          if (open_status.is_error()) {
+            return Status::Error(500, "Internal Server Error: can't create temporary file");
+          }
         }
         if (find_boundary(content_->clone(), boundary_, form_data_read_length_)) {
           auto file_part = content_->cut_head(form_data_read_length_).move_as_buffer_slice();
@@ -536,7 +539,7 @@ Result<size_t> HttpReader::split_header() {
     CHECK(query_->container_.back().size() == headers_read_length_ + 2);
     input_->advance(2);
     total_headers_length_ = headers_read_length_;
-    auto status = parse_head(query_->container_.back().as_slice());
+    auto status = parse_head(query_->container_.back().as_mutable_slice());
     if (status.is_error()) {
       return std::move(status);
     }
@@ -639,7 +642,7 @@ Status HttpReader::parse_json_parameters(MutableSlice parameters) {
       return Status::Error(400, "Bad Request: extra data after string");
     }
     query_->container_.emplace_back("content");
-    query_->args_.emplace_back(query_->container_.back().as_slice(), r_value.move_as_ok());
+    query_->args_.emplace_back(query_->container_.back().as_mutable_slice(), r_value.move_as_ok());
     return Status::OK();
   }
   parser.skip('{');

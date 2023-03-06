@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -88,6 +88,8 @@ class LinkManager final : public Actor {
 
   static string get_instant_view_link(Slice url, Slice rhash);
 
+  static string get_public_chat_link(Slice username);
+
   static UserId get_link_user_id(Slice url);
 
   static Result<CustomEmojiId> get_link_custom_emoji_id(Slice url);
@@ -108,7 +110,9 @@ class LinkManager final : public Actor {
   class InternalLinkBotStartInGroup;
   class InternalLinkChangePhoneNumber;
   class InternalLinkConfirmPhone;
+  class InternalLinkDefaultMessageAutoDeleteTimerSettings;
   class InternalLinkDialogInvite;
+  class InternalLinkEditProfileSettings;
   class InternalLinkFilterSettings;
   class InternalLinkGame;
   class InternalLinkInstantView;
@@ -131,6 +135,7 @@ class LinkManager final : public Actor {
   class InternalLinkUnknownDeepLink;
   class InternalLinkUnsupportedProxy;
   class InternalLinkUserPhoneNumber;
+  class InternalLinkUserToken;
   class InternalLinkVoiceChat;
 
   enum class LinkType : int32 { External, TMe, Tg, Telegraph };

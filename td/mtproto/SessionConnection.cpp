@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -91,8 +91,7 @@ namespace mtproto {
  *  A notification about new session.
  *  It is reasonable to store unique_id with current session, in order to process duplicated notifications once.
  *
- *  Causes all older than first_msg_id to be re-sent.
- *  Also there is a gap in updates, so getDifference MUST be sent
+ *  Causes all messages older than first_msg_id to be re-sent and notifies about a gap in updates
  *  output:
  *   - new_session_created#9ec20908 first_msg_id:long unique_id:long server_salt:long = NewSession
  *
@@ -497,33 +496,29 @@ Status SessionConnection::on_slice_packet(const MsgInfo &info, Slice packet) {
     return status;
   }
 
+  auto get_update_description = [&] {
+    return PSTRING() << "update from " << get_name() << " active for " << (Time::now() - created_at_)
+                     << " seconds in container " << container_id_ << " from session " << auth_data_->get_session_id()
+                     << " with message_id " << info.message_id << ", main_message_id = " << main_message_id_
+                     << ", seq_no = " << info.seq_no << " and original size = " << info.size;
+  };
+
   // It is an update... I hope.
   status = auth_data_->check_update(info.message_id);
   auto recheck_status = auth_data_->recheck_update(info.message_id);
   if (recheck_status.is_error() && recheck_status.code() == 2) {
-    LOG(WARNING) << "Receive very old update from " << get_name() << " created in " << (Time::now() - created_at_)
-                 << " in container " << container_id_ << " from session " << auth_data_->get_session_id()
-                 << " with message_id " << info.message_id << ", main_message_id = " << main_message_id_
-                 << ", seq_no = " << info.seq_no << " and original size " << info.size << ": " << status << ' '
-                 << recheck_status;
+    LOG(WARNING) << "Receive very old " << get_update_description() << ": " << status << ' ' << recheck_status;
   }
   if (status.is_error()) {
     if (status.code() == 2) {
-      LOG(WARNING) << "Receive too old update from " << get_name() << " created in " << (Time::now() - created_at_)
-                   << " in container " << container_id_ << " from session " << auth_data_->get_session_id()
-                   << " with message_id " << info.message_id << ", main_message_id = " << main_message_id_
-                   << ", seq_no = " << info.seq_no << " and original size " << info.size << ": " << status;
+      LOG(WARNING) << "Receive too old " << get_update_description() << ": " << status;
       callback_->on_session_failed(Status::Error("Receive too old update"));
       return status;
     }
-    VLOG(mtproto) << "Skip update " << info.message_id << " of size " << info.size << " with seq_no " << info.seq_no
-                  << " from " << get_name() << " created in " << (Time::now() - created_at_) << ": " << status;
+    VLOG(mtproto) << "Skip " << get_update_description() << ": " << status;
     return Status::OK();
   } else {
-    VLOG(mtproto) << "Got update from " << get_name() << " created in " << (Time::now() - created_at_)
-                  << " in container " << container_id_ << " from session " << auth_data_->get_session_id()
-                  << " with message_id " << info.message_id << ", main_message_id = " << main_message_id_
-                  << ", seq_no = " << info.seq_no << " and original size " << info.size;
+    VLOG(mtproto) << "Receive " << get_update_description();
     return callback_->on_update(as_buffer_slice(packet));
   }
 }
@@ -823,7 +818,7 @@ std::pair<uint64, BufferSlice> SessionConnection::encrypted_bind(int64 perm_key,
   auto object_storer = create_storer(object);
   auto size = object_storer.size();
   auto object_packet = BufferWriter{size, 0, 0};
-  auto real_size = object_storer.store(object_packet.as_slice().ubegin());
+  auto real_size = object_storer.store(object_packet.as_mutable_slice().ubegin());
   CHECK(size == real_size);
 
   MtprotoQuery query{
@@ -838,7 +833,7 @@ std::pair<uint64, BufferSlice> SessionConnection::encrypted_bind(int64 perm_key,
 
   const AuthKey &main_auth_key = auth_data_->get_main_auth_key();
   auto packet = BufferWriter{Transport::write(query_storer, main_auth_key, &info), 0, 0};
-  Transport::write(query_storer, main_auth_key, &info, packet.as_slice());
+  Transport::write(query_storer, main_auth_key, &info, packet.as_mutable_slice());
   return std::make_pair(query.message_id, packet.as_buffer_slice());
 }
 

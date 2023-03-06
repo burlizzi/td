@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -95,8 +95,7 @@ void FileGcWorker::run_gc(const FileGcParameters &parameters, std::vector<FullFi
 
   double now = Clocks::system();
 
-  // Keep all immune files
-  // Remove all files with (atime > now - max_time_from_last_access)
+  // Remove all suitable files with (atime > now - max_time_from_last_access)
   td::remove_if(files, [&](const FullFileInfo &info) {
     if (token_) {
       return false;

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -244,9 +244,7 @@ void SponsoredMessageManager::get_dialog_sponsored_messages(
 
 void SponsoredMessageManager::on_get_dialog_sponsored_messages(
     DialogId dialog_id, Result<telegram_api::object_ptr<telegram_api::messages_SponsoredMessages>> &&result) {
-  if (result.is_ok() && G()->close_flag()) {
-    result = Global::request_aborted_error();
-  }
+  G()->ignore_result_if_closing(result);
 
   auto &messages = dialog_sponsored_messages_[dialog_id];
   CHECK(messages != nullptr);
@@ -315,7 +313,7 @@ void SponsoredMessageManager::on_get_dialog_sponsored_messages(
         auto content = get_message_content(td_, std::move(message_text), nullptr, sponsor_dialog_id, true, UserId(),
                                            &ttl, &disable_web_page_preview, "on_get_dialog_sponsored_messages");
         if (ttl != 0) {
-          LOG(ERROR) << "Receive sponsored message with TTL " << ttl;
+          LOG(ERROR) << "Receive sponsored message with self-destruct time " << ttl;
           continue;
         }
         CHECK(disable_web_page_preview);

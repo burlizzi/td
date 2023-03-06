@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -14,6 +14,7 @@
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
 
+#include "td/utils/algorithm.h"
 #include "td/utils/buffer.h"
 #include "td/utils/format.h"
 #include "td/utils/logging.h"
@@ -27,9 +28,10 @@ static constexpr int32 REPLY_MARKUP_FLAG_NEED_RESIZE_KEYBOARD = 1 << 0;
 static constexpr int32 REPLY_MARKUP_FLAG_IS_ONE_TIME_KEYBOARD = 1 << 1;
 static constexpr int32 REPLY_MARKUP_FLAG_IS_PERSONAL = 1 << 2;
 static constexpr int32 REPLY_MARKUP_FLAG_HAS_PLACEHOLDER = 1 << 3;
+static constexpr int32 REPLY_MARKUP_FLAG_IS_PERSISTENT = 1 << 4;
 
 static bool operator==(const KeyboardButton &lhs, const KeyboardButton &rhs) {
-  return lhs.type == rhs.type && lhs.text == rhs.text;
+  return lhs.type == rhs.type && lhs.text == rhs.text && lhs.url == rhs.url;
 }
 
 static StringBuilder &operator<<(StringBuilder &string_builder, const KeyboardButton &keyboard_button) {
@@ -54,7 +56,10 @@ static StringBuilder &operator<<(StringBuilder &string_builder, const KeyboardBu
       string_builder << "RequestPollRegular";
       break;
     case KeyboardButton::Type::WebView:
-      string_builder << "WebView";
+      string_builder << "WebApp";
+      break;
+    case KeyboardButton::Type::RequestDialog:
+      string_builder << "RequestChat";
       break;
     default:
       UNREACHABLE();
@@ -122,8 +127,8 @@ bool operator==(const ReplyMarkup &lhs, const ReplyMarkup &rhs) {
   if (lhs.type != ReplyMarkup::Type::ShowKeyboard) {
     return true;
   }
-  return lhs.need_resize_keyboard == rhs.need_resize_keyboard && lhs.is_one_time_keyboard == rhs.is_one_time_keyboard &&
-         lhs.keyboard == rhs.keyboard;
+  return lhs.is_persistent == rhs.is_persistent && lhs.need_resize_keyboard == rhs.need_resize_keyboard &&
+         lhs.is_one_time_keyboard == rhs.is_one_time_keyboard && lhs.keyboard == rhs.keyboard;
 }
 
 bool operator!=(const ReplyMarkup &lhs, const ReplyMarkup &rhs) {
@@ -156,6 +161,9 @@ StringBuilder &ReplyMarkup::print(StringBuilder &string_builder) const {
   }
 
   if (type == ReplyMarkup::Type::ShowKeyboard) {
+    if (is_persistent) {
+      string_builder << ", persistent";
+    }
     if (need_resize_keyboard) {
       string_builder << ", need resize";
     }
@@ -232,6 +240,14 @@ static KeyboardButton get_keyboard_button(tl_object_ptr<telegram_api::KeyboardBu
       button.url = r_url.move_as_ok();
       break;
     }
+    case telegram_api::keyboardButtonRequestPeer::ID: {
+      auto keyboard_button = move_tl_object_as<telegram_api::keyboardButtonRequestPeer>(keyboard_button_ptr);
+      button.type = KeyboardButton::Type::RequestDialog;
+      button.text = std::move(keyboard_button->text_);
+      button.requested_dialog_type =
+          td::make_unique<RequestedDialogType>(std::move(keyboard_button->peer_type_), keyboard_button->button_id_);
+      break;
+    }
     default:
       LOG(ERROR) << "Unsupported keyboard button: " << to_string(keyboard_button_ptr);
   }
@@ -272,9 +288,8 @@ static InlineKeyboardButton get_inline_keyboard_button(
     }
     case telegram_api::keyboardButtonSwitchInline::ID: {
       auto keyboard_button = move_tl_object_as<telegram_api::keyboardButtonSwitchInline>(keyboard_button_ptr);
-      button.type = (keyboard_button->flags_ & telegram_api::keyboardButtonSwitchInline::SAME_PEER_MASK) != 0
-                        ? InlineKeyboardButton::Type::SwitchInlineCurrentDialog
-                        : InlineKeyboardButton::Type::SwitchInline;
+      button.type = keyboard_button->same_peer_ ? InlineKeyboardButton::Type::SwitchInlineCurrentDialog
+                                                : InlineKeyboardButton::Type::SwitchInline;
       button.text = std::move(keyboard_button->text_);
       button.data = std::move(keyboard_button->query_);
       break;
@@ -367,6 +382,7 @@ unique_ptr<ReplyMarkup> get_reply_markup(tl_object_ptr<telegram_api::ReplyMarkup
     case telegram_api::replyKeyboardMarkup::ID: {
       auto keyboard_markup = move_tl_object_as<telegram_api::replyKeyboardMarkup>(reply_markup_ptr);
       reply_markup->type = ReplyMarkup::Type::ShowKeyboard;
+      reply_markup->is_persistent = (keyboard_markup->flags_ & REPLY_MARKUP_FLAG_IS_PERSISTENT) != 0;
       reply_markup->need_resize_keyboard = (keyboard_markup->flags_ & REPLY_MARKUP_FLAG_NEED_RESIZE_KEYBOARD) != 0;
       reply_markup->is_one_time_keyboard = (keyboard_markup->flags_ & REPLY_MARKUP_FLAG_IS_ONE_TIME_KEYBOARD) != 0;
       reply_markup->is_personal = (keyboard_markup->flags_ & REPLY_MARKUP_FLAG_IS_PERSONAL) != 0;
@@ -483,10 +499,28 @@ static Result<KeyboardButton> get_keyboard_button(tl_object_ptr<td_api::keyboard
       current_button.url = std::move(button_type->url_);
       break;
     }
+    case td_api::keyboardButtonTypeRequestUser::ID: {
+      if (!request_buttons_allowed) {
+        return Status::Error(400, "Users can be requested in private chats only");
+      }
+      auto button_type = move_tl_object_as<td_api::keyboardButtonTypeRequestUser>(button->type_);
+      current_button.type = KeyboardButton::Type::RequestDialog;
+      current_button.requested_dialog_type = td::make_unique<RequestedDialogType>(std::move(button_type));
+      break;
+    }
+    case td_api::keyboardButtonTypeRequestChat::ID: {
+      if (!request_buttons_allowed) {
+        return Status::Error(400, "Chats can be requested in private chats only");
+      }
+      auto button_type = move_tl_object_as<td_api::keyboardButtonTypeRequestChat>(button->type_);
+      current_button.type = KeyboardButton::Type::RequestDialog;
+      current_button.requested_dialog_type = td::make_unique<RequestedDialogType>(std::move(button_type));
+      break;
+    }
     default:
       UNREACHABLE();
   }
-  return current_button;
+  return std::move(current_button);
 }
 
 static Result<InlineKeyboardButton> get_inline_keyboard_button(tl_object_ptr<td_api::inlineKeyboardButton> &&button,
@@ -612,7 +646,7 @@ static Result<InlineKeyboardButton> get_inline_keyboard_button(tl_object_ptr<td_
       UNREACHABLE();
   }
 
-  return current_button;
+  return std::move(current_button);
 }
 
 Result<unique_ptr<ReplyMarkup>> get_reply_markup(tl_object_ptr<td_api::ReplyMarkup> &&reply_markup_ptr, bool is_bot,
@@ -633,6 +667,7 @@ Result<unique_ptr<ReplyMarkup>> get_reply_markup(tl_object_ptr<td_api::ReplyMark
     case td_api::replyMarkupShowKeyboard::ID: {
       auto show_keyboard_markup = move_tl_object_as<td_api::replyMarkupShowKeyboard>(reply_markup_ptr);
       reply_markup->type = ReplyMarkup::Type::ShowKeyboard;
+      reply_markup->is_persistent = show_keyboard_markup->is_persistent_;
       reply_markup->need_resize_keyboard = show_keyboard_markup->resize_keyboard_;
       reply_markup->is_one_time_keyboard = show_keyboard_markup->one_time_;
       reply_markup->is_personal = show_keyboard_markup->is_personal_;
@@ -660,7 +695,7 @@ Result<unique_ptr<ReplyMarkup>> get_reply_markup(tl_object_ptr<td_api::ReplyMark
           }
         }
         if (!row_buttons.empty()) {
-          reply_markup->keyboard.push_back(row_buttons);
+          reply_markup->keyboard.push_back(std::move(row_buttons));
         }
         if (total_button_count >= 300) {
           break;
@@ -697,7 +732,7 @@ Result<unique_ptr<ReplyMarkup>> get_reply_markup(tl_object_ptr<td_api::ReplyMark
           }
         }
         if (!row_buttons.empty()) {
-          reply_markup->inline_keyboard.push_back(row_buttons);
+          reply_markup->inline_keyboard.push_back(std::move(row_buttons));
         }
         if (total_button_count >= 300) {
           break;
@@ -728,6 +763,30 @@ Result<unique_ptr<ReplyMarkup>> get_reply_markup(tl_object_ptr<td_api::ReplyMark
   return std::move(reply_markup);
 }
 
+unique_ptr<ReplyMarkup> dup_reply_markup(const unique_ptr<ReplyMarkup> &reply_markup) {
+  if (reply_markup == nullptr) {
+    return nullptr;
+  }
+  auto result = make_unique<ReplyMarkup>();
+  result->type = reply_markup->type;
+  result->is_personal = reply_markup->is_personal;
+  result->is_persistent = reply_markup->is_persistent;
+  result->need_resize_keyboard = reply_markup->need_resize_keyboard;
+  result->keyboard = transform(reply_markup->keyboard, [](const vector<KeyboardButton> &row) {
+    return transform(row, [](const KeyboardButton &button) {
+      KeyboardButton result;
+      result.type = button.type;
+      result.text = button.text;
+      result.url = button.url;
+      result.requested_dialog_type = td::make_unique<RequestedDialogType>(*button.requested_dialog_type);
+      return result;
+    });
+  });
+  result->placeholder = reply_markup->placeholder;
+  result->inline_keyboard = reply_markup->inline_keyboard;
+  return result;
+}
+
 static tl_object_ptr<telegram_api::KeyboardButton> get_input_keyboard_button(const KeyboardButton &keyboard_button) {
   switch (keyboard_button.type) {
     case KeyboardButton::Type::Text:
@@ -744,6 +803,10 @@ static tl_object_ptr<telegram_api::KeyboardButton> get_input_keyboard_button(con
       return make_tl_object<telegram_api::keyboardButtonRequestPoll>(1, false, keyboard_button.text);
     case KeyboardButton::Type::WebView:
       return make_tl_object<telegram_api::keyboardButtonSimpleWebView>(keyboard_button.text, keyboard_button.url);
+    case KeyboardButton::Type::RequestDialog:
+      return make_tl_object<telegram_api::keyboardButtonRequestPeer>(
+          keyboard_button.text, keyboard_button.requested_dialog_type->get_button_id(),
+          keyboard_button.requested_dialog_type->get_input_request_peer_type_object());
     default:
       UNREACHABLE();
       return nullptr;
@@ -841,10 +904,11 @@ tl_object_ptr<telegram_api::ReplyMarkup> ReplyMarkup::get_input_reply_markup(Con
       }
       LOG(DEBUG) << "Return replyKeyboardMarkup to send it";
       return make_tl_object<telegram_api::replyKeyboardMarkup>(
-          need_resize_keyboard * REPLY_MARKUP_FLAG_NEED_RESIZE_KEYBOARD +
+          is_persistent * REPLY_MARKUP_FLAG_IS_PERSISTENT +
+              need_resize_keyboard * REPLY_MARKUP_FLAG_NEED_RESIZE_KEYBOARD +
               is_one_time_keyboard * REPLY_MARKUP_FLAG_IS_ONE_TIME_KEYBOARD +
               is_personal * REPLY_MARKUP_FLAG_IS_PERSONAL + (!placeholder.empty()) * REPLY_MARKUP_FLAG_HAS_PLACEHOLDER,
-          false /*ignored*/, false /*ignored*/, false /*ignored*/, std::move(rows), placeholder);
+          false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, std::move(rows), placeholder);
     }
     case ReplyMarkup::Type::ForceReply:
       LOG(DEBUG) << "Return replyKeyboardForceReply to send it";
@@ -884,6 +948,9 @@ static tl_object_ptr<td_api::keyboardButton> get_keyboard_button_object(const Ke
       break;
     case KeyboardButton::Type::WebView:
       type = make_tl_object<td_api::keyboardButtonTypeWebApp>(keyboard_button.url);
+      break;
+    case KeyboardButton::Type::RequestDialog:
+      type = keyboard_button.requested_dialog_type->get_keyboard_button_type_object();
       break;
     default:
       UNREACHABLE();
@@ -967,7 +1034,7 @@ tl_object_ptr<td_api::ReplyMarkup> ReplyMarkup::get_reply_markup_object(Contacts
         rows.push_back(std::move(buttons));
       }
 
-      return make_tl_object<td_api::replyMarkupShowKeyboard>(std::move(rows), need_resize_keyboard,
+      return make_tl_object<td_api::replyMarkupShowKeyboard>(std::move(rows), is_persistent, need_resize_keyboard,
                                                              is_one_time_keyboard, is_personal, placeholder);
     }
     case ReplyMarkup::Type::RemoveKeyboard:
@@ -978,6 +1045,17 @@ tl_object_ptr<td_api::ReplyMarkup> ReplyMarkup::get_reply_markup_object(Contacts
       UNREACHABLE();
       return nullptr;
   }
+}
+
+Status ReplyMarkup::check_shared_dialog(Td *td, int32 button_id, DialogId dialog_id) const {
+  for (auto &row : keyboard) {
+    for (auto &button : row) {
+      if (button.requested_dialog_type != nullptr && button.requested_dialog_type->get_button_id() == button_id) {
+        return button.requested_dialog_type->check_shared_dialog(td, dialog_id);
+      }
+    }
+  }
+  return Status::Error(400, "Button not found");
 }
 
 tl_object_ptr<telegram_api::ReplyMarkup> get_input_reply_markup(ContactsManager *contacts_manager,

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -42,6 +42,7 @@ class AnimationsManager;
 class AttachMenuManager;
 class AudiosManager;
 class AuthManager;
+class AutosaveManager;
 class BackgroundManager;
 class CallManager;
 class CallbackQueriesManager;
@@ -77,6 +78,7 @@ class StickersManager;
 class StorageManager;
 class ThemeManager;
 class TopDialogManager;
+class TranslationManager;
 class UpdatesManager;
 class VideoNotesManager;
 class VideosManager;
@@ -117,7 +119,7 @@ class Td final : public Actor {
 
   void schedule_get_promo_data(int32 expires_in);
 
-  void on_update(BufferSlice &&update);
+  void on_update(BufferSlice &&update, uint64 auth_key_id);
 
   void on_result(NetQueryPtr query);
 
@@ -143,6 +145,8 @@ class Td final : public Actor {
   ActorOwn<AttachMenuManager> attach_menu_manager_actor_;
   unique_ptr<AuthManager> auth_manager_;
   ActorOwn<AuthManager> auth_manager_actor_;
+  unique_ptr<AutosaveManager> autosave_manager_;
+  ActorOwn<AutosaveManager> autosave_manager_actor_;
   unique_ptr<BackgroundManager> background_manager_;
   ActorOwn<BackgroundManager> background_manager_actor_;
   unique_ptr<ContactsManager> contacts_manager_;
@@ -181,6 +185,8 @@ class Td final : public Actor {
   ActorOwn<ThemeManager> theme_manager_actor_;
   unique_ptr<TopDialogManager> top_dialog_manager_;
   ActorOwn<TopDialogManager> top_dialog_manager_actor_;
+  unique_ptr<TranslationManager> translation_manager_;
+  ActorOwn<TranslationManager> translation_manager_actor_;
   unique_ptr<UpdatesManager> updates_manager_;
   ActorOwn<UpdatesManager> updates_manager_actor_;
   unique_ptr<VideoNotesManager> video_notes_manager_;
@@ -396,6 +402,8 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::setAuthenticationPhoneNumber &request);
 
+  void on_request(uint64 id, td_api::sendAuthenticationFirebaseSms &request);
+
   void on_request(uint64 id, td_api::setAuthenticationEmailAddress &request);
 
   void on_request(uint64 id, const td_api::resendAuthenticationCode &request);
@@ -470,6 +478,10 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::setUserPrivacySettingRules &request);
 
+  void on_request(uint64 id, const td_api::getDefaultMessageAutoDeleteTime &request);
+
+  void on_request(uint64 id, const td_api::setDefaultMessageAutoDeleteTime &request);
+
   void on_request(uint64 id, const td_api::getAccountTtl &request);
 
   void on_request(uint64 id, const td_api::setAccountTtl &request);
@@ -481,6 +493,10 @@ class Td final : public Actor {
   void on_request(uint64 id, td_api::checkChangePhoneNumberCode &request);
 
   void on_request(uint64 id, td_api::resendChangePhoneNumberCode &request);
+
+  void on_request(uint64 id, const td_api::getUserLink &request);
+
+  void on_request(uint64 id, td_api::searchUserByToken &request);
 
   void on_request(uint64 id, const td_api::getActiveSessions &request);
 
@@ -544,6 +560,8 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::translateText &request);
 
+  void on_request(uint64 id, td_api::translateMessageText &request);
+
   void on_request(uint64 id, const td_api::recognizeSpeech &request);
 
   void on_request(uint64 id, const td_api::rateSpeechRecognition &request);
@@ -571,6 +589,12 @@ class Td final : public Actor {
   void on_request(uint64 id, const td_api::getAutoDownloadSettingsPresets &request);
 
   void on_request(uint64 id, const td_api::setAutoDownloadSettings &request);
+
+  void on_request(uint64 id, const td_api::getAutosaveSettings &request);
+
+  void on_request(uint64 id, td_api::setAutosaveSettings &request);
+
+  void on_request(uint64 id, const td_api::clearAutosaveSettingsExceptions &request);
 
   void on_request(uint64 id, const td_api::getTopChats &request);
 
@@ -740,7 +764,19 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::editForumTopic &request);
 
+  void on_request(uint64 id, const td_api::getForumTopic &request);
+
+  void on_request(uint64 id, const td_api::getForumTopicLink &request);
+
+  void on_request(uint64 id, td_api::getForumTopics &request);
+
   void on_request(uint64 id, const td_api::toggleForumTopicIsClosed &request);
+
+  void on_request(uint64 id, const td_api::toggleGeneralForumTopicIsHidden &request);
+
+  void on_request(uint64 id, const td_api::toggleForumTopicIsPinned &request);
+
+  void on_request(uint64 id, const td_api::setPinnedForumTopics &request);
 
   void on_request(uint64 id, const td_api::deleteForumTopic &request);
 
@@ -876,7 +912,7 @@ class Td final : public Actor {
 
   void on_request(uint64 id, const td_api::setChatPhoto &request);
 
-  void on_request(uint64 id, const td_api::setChatMessageTtl &request);
+  void on_request(uint64 id, const td_api::setChatMessageAutoDeleteTime &request);
 
   void on_request(uint64 id, const td_api::setChatPermissions &request);
 
@@ -887,6 +923,8 @@ class Td final : public Actor {
   void on_request(uint64 id, const td_api::toggleChatHasProtectedContent &request);
 
   void on_request(uint64 id, const td_api::toggleChatIsPinned &request);
+
+  void on_request(uint64 id, const td_api::toggleChatIsTranslatable &request);
 
   void on_request(uint64 id, const td_api::toggleChatIsMarkedAsUnread &request);
 
@@ -1036,6 +1074,10 @@ class Td final : public Actor {
 
   void on_request(uint64 id, const td_api::clearImportedContacts &request);
 
+  void on_request(uint64 id, td_api::setUserPersonalProfilePhoto &request);
+
+  void on_request(uint64 id, td_api::suggestUserProfilePhoto &request);
+
   void on_request(uint64 id, td_api::searchUserByPhoneNumber &request);
 
   void on_request(uint64 id, const td_api::sharePhoneNumber &request);
@@ -1102,11 +1144,17 @@ class Td final : public Actor {
 
   void on_request(uint64 id, const td_api::toggleSupergroupIsAllHistoryAvailable &request);
 
+  void on_request(uint64 id, const td_api::toggleSupergroupHasHiddenMembers &request);
+
+  void on_request(uint64 id, const td_api::toggleSupergroupHasAggressiveAntiSpamEnabled &request);
+
   void on_request(uint64 id, const td_api::toggleSupergroupIsForum &request);
 
   void on_request(uint64 id, const td_api::toggleSupergroupIsBroadcastGroup &request);
 
   void on_request(uint64 id, const td_api::reportSupergroupSpam &request);
+
+  void on_request(uint64 id, const td_api::reportSupergroupAntiSpamFalsePositive &request);
 
   void on_request(uint64 id, td_api::getSupergroupMembers &request);
 
@@ -1174,11 +1222,17 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::searchEmojis &request);
 
+  void on_request(uint64 id, const td_api::getEmojiCategories &request);
+
   void on_request(uint64 id, td_api::getAnimatedEmoji &request);
 
   void on_request(uint64 id, td_api::getEmojiSuggestionsUrl &request);
 
   void on_request(uint64 id, const td_api::getCustomEmojiStickers &request);
+
+  void on_request(uint64 id, const td_api::getDefaultChatPhotoCustomEmojiStickers &request);
+
+  void on_request(uint64 id, const td_api::getDefaultProfilePhotoCustomEmojiStickers &request);
 
   void on_request(uint64 id, const td_api::getFavoriteStickers &request);
 
@@ -1199,6 +1253,8 @@ class Td final : public Actor {
   void on_request(uint64 id, const td_api::getScopeNotificationSettings &request);
 
   void on_request(uint64 id, td_api::setChatNotificationSettings &request);
+
+  void on_request(uint64 id, td_api::setForumTopicNotificationSettings &request);
 
   void on_request(uint64 id, td_api::setScopeNotificationSettings &request);
 
@@ -1253,6 +1309,10 @@ class Td final : public Actor {
   void on_request(uint64 id, const td_api::getLoginUrlInfo &request);
 
   void on_request(uint64 id, const td_api::getLoginUrl &request);
+
+  void on_request(uint64 id, const td_api::shareUserWithBot &request);
+
+  void on_request(uint64 id, const td_api::shareChatWithBot &request);
 
   void on_request(uint64 id, td_api::getInlineQueryResults &request);
 

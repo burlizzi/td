@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -153,6 +153,12 @@ TEST(Link, parse_internal_link) {
   auto chat_invite = [](const td::string &hash) {
     return td::td_api::make_object<td::td_api::internalLinkTypeChatInvite>("tg:join?invite=" + hash);
   };
+  auto default_message_auto_delete_timer_settings = [] {
+    return td::td_api::make_object<td::td_api::internalLinkTypeDefaultMessageAutoDeleteTimerSettings>();
+  };
+  auto edit_profile_settings = [] {
+    return td::td_api::make_object<td::td_api::internalLinkTypeEditProfileSettings>();
+  };
   auto filter_settings = [] {
     return td::td_api::make_object<td::td_api::internalLinkTypeFilterSettings>();
   };
@@ -214,8 +220,8 @@ TEST(Link, parse_internal_link) {
   auto settings = [] {
     return td::td_api::make_object<td::td_api::internalLinkTypeSettings>();
   };
-  auto sticker_set = [](const td::string &sticker_set_name) {
-    return td::td_api::make_object<td::td_api::internalLinkTypeStickerSet>(sticker_set_name);
+  auto sticker_set = [](const td::string &sticker_set_name, bool expect_custom_emoji) {
+    return td::td_api::make_object<td::td_api::internalLinkTypeStickerSet>(sticker_set_name, expect_custom_emoji);
   };
   auto theme = [](const td::string &theme_name) {
     return td::td_api::make_object<td::td_api::internalLinkTypeTheme>(theme_name);
@@ -231,6 +237,9 @@ TEST(Link, parse_internal_link) {
   };
   auto user_phone_number = [](const td::string &phone_number) {
     return td::td_api::make_object<td::td_api::internalLinkTypeUserPhoneNumber>(phone_number);
+  };
+  auto user_token = [](const td::string &token) {
+    return td::td_api::make_object<td::td_api::internalLinkTypeUserToken>(token);
   };
   auto video_chat = [](const td::string &chat_username, const td::string &invite_hash, bool is_live_stream) {
     return td::td_api::make_object<td::td_api::internalLinkTypeVideoChat>(chat_username, invite_hash, is_live_stream);
@@ -317,6 +326,20 @@ TEST(Link, parse_internal_link) {
   parse_internal_link("tg:resolve?phone=", unknown_deep_link("tg://resolve?phone="));
   parse_internal_link("tg:resolve?phone=+123", unknown_deep_link("tg://resolve?phone=+123"));
   parse_internal_link("tg:resolve?phone=123456 ", unknown_deep_link("tg://resolve?phone=123456 "));
+
+  parse_internal_link("tg:contact?token=1", user_token("1"));
+  parse_internal_link("tg:contact?token=123456", user_token("123456"));
+  parse_internal_link("tg:contact?token=123456&startattach", user_token("123456"));
+  parse_internal_link("tg:contact?token=123456&startattach=123", user_token("123456"));
+  parse_internal_link("tg:contact?token=123456&attach=", user_token("123456"));
+  parse_internal_link("tg:contact?token=123456&attach=&startattach", user_token("123456"));
+  parse_internal_link("tg:contact?token=123456&attach=&startattach=123", user_token("123456"));
+  parse_internal_link("tg:contact?token=01234567890123456789012345678912",
+                      user_token("01234567890123456789012345678912"));
+  parse_internal_link("tg:contact?token=012345678901234567890123456789123",
+                      user_token("012345678901234567890123456789123"));
+  parse_internal_link("tg:contact?token=", unknown_deep_link("tg://contact?token="));
+  parse_internal_link("tg:contact?token=+123", user_token(" 123"));
 
   parse_internal_link("t.me/username/12345?single", message("tg:resolve?domain=username&post=12345&single"));
   parse_internal_link("t.me/username/12345?asdasd", message("tg:resolve?domain=username&post=12345"));
@@ -573,6 +596,12 @@ TEST(Link, parse_internal_link) {
   parse_internal_link("t.me/+123456?attach=bot&startattach=1",
                       attachment_menu_bot(nullptr, user_phone_number("123456"), "bot", "1"));
 
+  parse_internal_link("t.me/contact/startattach/adasd", user_token("startattach"));
+  parse_internal_link("t.me/contact/startattach", user_token("startattach"));
+  parse_internal_link("t.me/contact/startattach=1", user_token("startattach=1"));
+  parse_internal_link("t.me/contact/", nullptr);
+  parse_internal_link("t.me/contact/?attach=&startattach", nullptr);
+
   parse_internal_link("tg:join?invite=abcdef", chat_invite("abcdef"));
   parse_internal_link("tg:join?invite=abc%20def", chat_invite("abc%20def"));
   parse_internal_link("tg://join?invite=abc%30def", chat_invite("abc0def"));
@@ -585,15 +614,15 @@ TEST(Link, parse_internal_link) {
   parse_internal_link("t.me/addstickers?/abcdef", nullptr);
   parse_internal_link("t.me/addstickers/?abcdef", nullptr);
   parse_internal_link("t.me/addstickers/#abcdef", nullptr);
-  parse_internal_link("t.me/addstickers/abacaba", sticker_set("abacaba"));
-  parse_internal_link("t.me/addstickers/aba%20aba", sticker_set("aba aba"));
-  parse_internal_link("t.me/addstickers/123456a", sticker_set("123456a"));
-  parse_internal_link("t.me/addstickers/12345678901", sticker_set("12345678901"));
-  parse_internal_link("t.me/addstickers/123456", sticker_set("123456"));
-  parse_internal_link("t.me/addstickers/123456/123123/12/31/a/s//21w/?asdas#test", sticker_set("123456"));
+  parse_internal_link("t.me/addstickers/abacaba", sticker_set("abacaba", false));
+  parse_internal_link("t.me/addstickers/aba%20aba", sticker_set("aba aba", false));
+  parse_internal_link("t.me/addstickers/123456a", sticker_set("123456a", false));
+  parse_internal_link("t.me/addstickers/12345678901", sticker_set("12345678901", false));
+  parse_internal_link("t.me/addstickers/123456", sticker_set("123456", false));
+  parse_internal_link("t.me/addstickers/123456/123123/12/31/a/s//21w/?asdas#test", sticker_set("123456", false));
 
-  parse_internal_link("tg:addstickers?set=abcdef", sticker_set("abcdef"));
-  parse_internal_link("tg:addstickers?set=abc%30ef", sticker_set("abc0ef"));
+  parse_internal_link("tg:addstickers?set=abcdef", sticker_set("abcdef", false));
+  parse_internal_link("tg:addstickers?set=abc%30ef", sticker_set("abc0ef", false));
   parse_internal_link("tg://addstickers?set=", unknown_deep_link("tg://addstickers?set="));
 
   parse_internal_link("t.me/addemoji?set=abcdef", nullptr);
@@ -603,15 +632,15 @@ TEST(Link, parse_internal_link) {
   parse_internal_link("t.me/addemoji?/abcdef", nullptr);
   parse_internal_link("t.me/addemoji/?abcdef", nullptr);
   parse_internal_link("t.me/addemoji/#abcdef", nullptr);
-  parse_internal_link("t.me/addemoji/abacaba", sticker_set("abacaba"));
-  parse_internal_link("t.me/addemoji/aba%20aba", sticker_set("aba aba"));
-  parse_internal_link("t.me/addemoji/123456a", sticker_set("123456a"));
-  parse_internal_link("t.me/addemoji/12345678901", sticker_set("12345678901"));
-  parse_internal_link("t.me/addemoji/123456", sticker_set("123456"));
-  parse_internal_link("t.me/addemoji/123456/123123/12/31/a/s//21w/?asdas#test", sticker_set("123456"));
+  parse_internal_link("t.me/addemoji/abacaba", sticker_set("abacaba", true));
+  parse_internal_link("t.me/addemoji/aba%20aba", sticker_set("aba aba", true));
+  parse_internal_link("t.me/addemoji/123456a", sticker_set("123456a", true));
+  parse_internal_link("t.me/addemoji/12345678901", sticker_set("12345678901", true));
+  parse_internal_link("t.me/addemoji/123456", sticker_set("123456", true));
+  parse_internal_link("t.me/addemoji/123456/123123/12/31/a/s//21w/?asdas#test", sticker_set("123456", true));
 
-  parse_internal_link("tg:addemoji?set=abcdef", sticker_set("abcdef"));
-  parse_internal_link("tg:addemoji?set=abc%30ef", sticker_set("abc0ef"));
+  parse_internal_link("tg:addemoji?set=abcdef", sticker_set("abcdef", true));
+  parse_internal_link("tg:addemoji?set=abc%30ef", sticker_set("abc0ef", true));
   parse_internal_link("tg://addemoji?set=", unknown_deep_link("tg://addemoji?set="));
 
   parse_internal_link("t.me/confirmphone?hash=abc%30ef&phone=", nullptr);
@@ -943,8 +972,10 @@ TEST(Link, parse_internal_link) {
   parse_internal_link("tg://settings/themes/?as#rad", theme_settings());
   parse_internal_link("tg://settings/themes/a", settings());
   parse_internal_link("tg://settings/asdsathemesasdas/devices", settings());
+  parse_internal_link("tg://settings/auto_delete", default_message_auto_delete_timer_settings());
   parse_internal_link("tg://settings/devices", active_sessions());
   parse_internal_link("tg://settings/change_number", change_phone_number());
+  parse_internal_link("tg://settings/edit_profile", edit_profile_settings());
   parse_internal_link("tg://settings/folders", filter_settings());
   parse_internal_link("tg://settings/filters", settings());
   parse_internal_link("tg://settings/language", language_settings());

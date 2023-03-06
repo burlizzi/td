@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2022
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -65,6 +65,10 @@ class DialogId {
   ChatId get_chat_id() const;
   ChannelId get_channel_id() const;
   SecretChatId get_secret_chat_id() const;
+
+  static DialogId get_message_dialog_id(const telegram_api::Message *message_ptr);
+
+  static DialogId get_message_dialog_id(const tl_object_ptr<telegram_api::Message> &message_ptr);
 
   template <class StorerT>
   void store(StorerT &storer) const {
